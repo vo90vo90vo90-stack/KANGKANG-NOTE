@@ -1,0 +1,1465 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#e08a3c">
+<meta name="color-scheme" content="light dark">
+<title>캉캉 노트</title>
+<!--
+  캉캉 노트 - 반려견 관리 (가족 공유) · 단일 HTML + Firebase(Firestore, 익명 로그인)
+
+  [사용 방법]
+  1) 이 파일을 HTTPS 주소에 올려서(Firebase Hosting 등) 가족 폰에서 엽니다.
+  2) 처음 쓰는 사람: "가족 만들기" → 나온 가족 코드를 가족에게 알려줍니다.
+     나머지 가족: "가족 코드로 참여" → 코드 입력 → 내 이름 선택.
+  3) 화면은 홈(대시보드) / 관리(입력) / 기준(설정) 3개입니다.
+
+  [백업 안내]
+  - 사진은 줄여서 Firestore에 저장되고, 무료 한도(1GB)에 가까워지면 기준 화면의 백업 → 사진 정리를 쓰세요.
+  - 백업 파일(.zip/.json)은 가족 폰이 아닌 곳(구글 드라이브 등)에도 보관하세요.
+-->
+<style>
+/* ========== 테마 (CSS 변수 8개 + 보조색) ========== */
+:root{--bg:#faf6f1;--c:#fff;--t:#2b2118;--s:#85766a;--p:#e08a3c;--ln:#eadfd3;--soft:#fdeedd;--g:#2f9e62;--r:#d64545;--o:#e0892a}
+@media (prefers-color-scheme:dark){
+ :root{--bg:#171310;--c:#221c17;--t:#f3ebe3;--s:#a99a8c;--p:#f0a050;--ln:#3a3029;--soft:#33271c;--g:#4cc58a;--r:#ff7070;--o:#f2a24a}
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html{scroll-behavior:auto}
+body{margin:0;background:var(--bg);color:var(--t);font:15px/1.5 -apple-system,"Noto Sans KR","Malgun Gothic",sans-serif;padding-bottom:calc(72px + env(safe-area-inset-bottom))}
+body.lock{overflow:hidden}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit}
+
+/* ========== 레이아웃 ========== */
+header{position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:1px solid var(--ln);padding:calc(10px + env(safe-area-inset-top)) 14px 10px;display:flex;align-items:center;gap:8px}
+#ht{flex:1;font-weight:800;font-size:18px}
+#sync{font-size:12px;color:var(--s);white-space:nowrap}
+main{max-width:640px;margin:0 auto;padding:12px 14px}
+nav#tabs{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--c);border-top:1px solid var(--ln);display:flex;padding-bottom:env(safe-area-inset-bottom)}
+nav#tabs a{flex:1;text-align:center;padding:9px 0 8px;font-size:12px;color:var(--s)}
+nav#tabs a b{display:block;font-size:20px;line-height:1.2}
+nav#tabs a.on{color:var(--p);font-weight:700}
+
+/* ========== 카드·버튼·입력 ========== */
+.card{background:var(--c);border:1px solid var(--ln);border-radius:16px;padding:14px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,.04)}
+.card h2{margin:0 0 10px;font-size:15px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.card h2 small{font-weight:400;color:var(--s);font-size:12px}
+.sub{color:var(--s);font-size:13px}
+.msg{margin:4px 0 14px;font-size:15px;white-space:pre-line}
+.btn{border:0;background:var(--p);color:#fff;border-radius:12px;padding:11px 16px;font-weight:700;cursor:pointer}
+.btn.ghost{background:var(--soft);color:var(--t)}
+.btn.red{background:var(--r);color:#fff}
+.btn.sm{padding:7px 12px;font-size:13px}
+.btn.block{display:block;width:100%;margin-top:8px}
+.btn:disabled{opacity:.5}
+.row{display:flex;gap:8px;margin-top:14px}
+.row .btn{flex:1}
+input,select,textarea{width:100%;border:1px solid var(--ln);background:var(--c);color:var(--t);border-radius:12px;padding:10px 12px;font:inherit;min-width:0}
+textarea{min-height:70px;resize:vertical}
+.lbl{font-size:13px;color:var(--s);margin:12px 0 5px}
+.two{display:flex;gap:8px}
+.two>*{flex:1}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--ln);background:var(--c);border-radius:20px;padding:6px 12px;font-size:14px;cursor:pointer;white-space:nowrap}
+.chip.on{background:var(--p);border-color:var(--p);color:#fff;font-weight:700}
+.chips.scroll{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;margin-bottom:10px}
+.ck{display:flex;gap:8px;align-items:center;margin-top:10px}
+.ck input{width:auto}
+
+/* ========== 의미 색 ========== */
+.t-good{background:var(--g)}.t-warn{background:var(--o)}.t-bad{background:var(--r)}
+.c-good{color:var(--g)}.c-warn{color:var(--o)}.c-bad{color:var(--r)}
+.dot{display:inline-block;width:14px;height:14px;border-radius:50%;margin:1px}
+.tag{display:inline-block;font-size:12px;border-radius:10px;padding:1px 8px;background:var(--soft);color:var(--t)}
+.tag.red{background:var(--r);color:#fff}.tag.orange{background:var(--o);color:#fff}.tag.green{background:var(--g);color:#fff}
+
+/* ========== 홈 ========== */
+.hero{display:flex;gap:12px;align-items:center;background:var(--soft)}
+.hero .av{font-size:38px}
+.hero .nm{font-size:20px;font-weight:800}
+.quick{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
+.quick button{border:1px solid var(--ln);background:var(--c);border-radius:14px;padding:10px 0;font-size:12px;cursor:pointer}
+.quick button b{display:block;font-size:22px}
+.banner{border-radius:14px;padding:11px 13px;margin-bottom:12px;font-size:14px;cursor:pointer}
+.banner.red{background:var(--r);color:#fff}
+.banner.orange{background:var(--o);color:#fff}
+.big{font-size:28px;font-weight:800}
+.week{display:flex;gap:4px}
+.week .d{flex:1;text-align:center}
+.week .stk{min-height:38px;display:flex;flex-direction:column-reverse;align-items:center;justify-content:flex-start}
+.week .lb{font-size:11px;color:var(--s)}
+.week .lb.today{color:var(--p);font-weight:800}
+.bars{display:flex;gap:6px;align-items:flex-end;height:84px;position:relative}
+.bars .b{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%}
+.bars .b i{display:block;width:70%;background:var(--p);border-radius:5px 5px 0 0;min-height:2px}
+.bars .goal{position:absolute;left:0;right:0;border-top:1px dashed var(--s)}
+.hbar{height:8px;background:var(--soft);border-radius:6px;overflow:hidden;margin-top:3px}
+.hbar i{display:block;height:100%;background:var(--p)}
+.hbar.warn i{background:var(--o)}.hbar.bad i{background:var(--r)}
+.gal{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.gal button{position:relative;border:0;padding:0;border-radius:10px;overflow:hidden;aspect-ratio:1;background:var(--soft);cursor:pointer}
+.gal img{width:100%;height:100%;object-fit:cover;display:block}
+.gal span{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.55);color:#fff;font-size:10px;text-align:center}
+.gal i{position:absolute;top:4px;right:4px;width:10px;height:10px;border-radius:50%;border:1.5px solid #fff}
+.li{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--ln)}
+.li:first-of-type{border-top:0}
+
+/* ========== 기록 목록 ========== */
+.dh{display:flex;justify-content:space-between;font-size:13px;color:var(--s);margin:14px 2px 6px}
+.rec{background:var(--c);border:1px solid var(--ln);border-radius:14px;padding:11px 13px;margin-bottom:8px;cursor:pointer}
+.rec .rt{display:flex;justify-content:space-between;gap:8px}
+.rec .rt b{font-size:15px}
+.rec .by{font-size:12px;color:var(--s);white-space:nowrap}
+.rec .rs{font-size:13px;color:var(--s);margin-top:2px;word-break:break-word}
+.th{width:62px;height:62px;object-fit:cover;border-radius:10px;margin:8px 6px 0 0;cursor:pointer;border:1px solid var(--ln)}
+.rec .del{float:right;border:0;background:none;color:var(--r);font-size:13px;cursor:pointer;padding:2px 4px}
+.flash{outline:2px solid var(--p)}
+
+/* ========== 바텀시트 ========== */
+.mbg{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center}
+.sheet{background:var(--bg);width:100%;max-width:640px;max-height:88vh;overflow-y:auto;border-radius:22px 22px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));animation:up .18s ease-out}
+.sheet h3{margin:0 0 6px;font-size:17px}
+@keyframes up{from{transform:translateY(40px);opacity:.4}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){.sheet{animation:none}}
+.phs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.ph{position:relative;width:76px;height:76px}
+.ph img{width:100%;height:100%;object-fit:cover;border-radius:10px;border:1px solid var(--ln)}
+.ph button{position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;border:0;background:var(--r);color:#fff;cursor:pointer;line-height:1}
+.pv img{width:100%;max-height:60vh;object-fit:contain;border-radius:12px;background:#000}
+.pv .sub{white-space:pre-line}
+.scorebtn{display:flex;gap:6px;align-items:center;width:100%;text-align:left;border:1px solid var(--ln);background:var(--c);border-radius:12px;padding:9px 12px;margin-bottom:6px;cursor:pointer}
+.scorebtn.on{border-color:var(--p);background:var(--soft);font-weight:700}
+.scorebtn b{width:22px}
+.trow{display:flex;gap:6px;margin-bottom:6px;align-items:center}
+.trow .ro{min-width:24px;color:var(--s)}
+.trow .x{border:0;background:none;color:var(--r);font-size:20px;cursor:pointer}
+
+/* ========== 토스트·진행 ========== */
+#toast{position:fixed;left:50%;bottom:calc(90px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:80;background:#222;color:#fff;border-radius:22px;padding:10px 16px;font-size:14px;max-width:88vw;display:none;text-align:center}
+#prog{position:fixed;inset:0;z-index:90;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center}
+#prog div{background:var(--c);border-radius:16px;padding:20px 24px;text-align:center;max-width:80vw;white-space:pre-line}
+.code{font-size:26px;font-weight:800;letter-spacing:2px;text-align:center;background:var(--soft);border-radius:14px;padding:14px;margin:10px 0;user-select:all}
+.empty{color:var(--s);text-align:center;padding:22px 0;font-size:14px}
+</style>
+</head>
+<body>
+<header><div id="ht">🐶 캉캉 노트</div><div id="sync"></div><div id="ha"></div></header>
+<main id="app"><div class="empty">불러오는 중…</div></main>
+<nav id="tabs" style="display:none">
+  <a href="#/" data-tab="home"><b>🏠</b>홈</a>
+  <a href="#/log" data-tab="log"><b>✏️</b>관리</a>
+  <a href="#/set" data-tab="set"><b>⚙️</b>기준</a>
+</nav>
+<div id="toast"></div>
+<div id="prog"><div id="progt"></div></div>
+
+<script>
+/* 시작 실패 안내: 앱이 뜨지 못하면 '불러오는 중'에서 멈추지 않고 원인을 보여줍니다. */
+window.__fatal = function (msg) {
+  var a = document.getElementById('app');
+  if (!a) return;
+  a.innerHTML = '<div class="card"><h2>⚠️ 앱을 시작하지 못했어요</h2><p class="msg"></p></div>';
+  a.querySelector('.msg').textContent = msg;
+};
+window.addEventListener('error', function (e) { if (!window.__ready) window.__fatal('오류: ' + (e.message || e)); });
+window.addEventListener('unhandledrejection', function (e) { if (!window.__ready) window.__fatal('오류: ' + ((e.reason && e.reason.message) || e.reason)); });
+setTimeout(function () {
+  if (!window.__ready) window.__fatal(location.protocol === 'file:'
+    ? '파일을 직접 열면 동작하지 않아요.\nHTTPS 주소(웹 호스팅)에 올려서 그 주소로 열어야 해요.'
+    : '10초가 지나도 시작되지 않았어요.\n인터넷 연결을 확인하고 새로고침해 주세요.');
+}, 10000);
+</script>
+<script type="module">
+/* =====================================================================
+   0. Firebase 연결
+   ===================================================================== */
+// 파일을 그냥 열면(file://) 로그인이 동작하지 않아요 → 안내 문구를 보여주고 멈춥니다.
+if (location.protocol === 'file:') {
+  window.__fatal('파일을 직접 열면 동작하지 않아요.\nHTTPS 주소(웹 호스팅)에 올려서 그 주소로 열어야 해요.');
+  throw new Error('file protocol');
+}
+// SDK는 동적으로 불러와서, 실패하면 화면에 원인을 보여줍니다.
+const SDK = "https://www.gstatic.com/firebasejs/13.2.0/";
+let appM, authM, fsM;
+try {
+  [appM, authM, fsM] = await Promise.all([
+    import(SDK + "firebase-app.js"), import(SDK + "firebase-auth.js"), import(SDK + "firebase-firestore.js")
+  ]);
+} catch (e) {
+  window.__fatal('Firebase 라이브러리를 불러오지 못했어요.\n인터넷 연결을 확인하고 새로고침해 주세요.\n(' + (e && e.message || e) + ')');
+  throw e;
+}
+const { initializeApp } = appM;
+const { getAuth, signInAnonymously, onAuthStateChanged } = authM;
+const {
+  initializeFirestore, getFirestore, persistentLocalCache, persistentMultipleTabManager,
+  doc, getDoc, setDoc, deleteDoc, collection, query, where, onSnapshot, getDocs,
+  increment, writeBatch, getAggregateFromServer, sum, count
+} = fsM;
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBC5pVO2NwPzprqouaiZhfm5ZLpApe0tU8",
+  authDomain: "kangkang-note.firebaseapp.com",
+  projectId: "kangkang-note",
+  storageBucket: "kangkang-note.firebasestorage.app",
+  messagingSenderId: "833753049789",
+  appId: "1:833753049789:web:c2427cbf843d74a02865d4"
+};
+const fbApp = initializeApp(firebaseConfig);
+let auth;
+try { auth = getAuth(fbApp); }
+catch (e) {
+  window.__fatal('이 환경에서는 로그인 기능을 쓸 수 없어요.\n크롬 같은 일반 브라우저에서 HTTPS 주소로 열어 주세요.\n(' + (e && e.message || e) + ')');
+  throw e;
+}
+let db;
+try { // 오프라인 저장(캐시)을 켭니다. 지원이 안 되는 환경이면 기본 모드로 동작
+  db = initializeFirestore(fbApp, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) });
+} catch (e) { db = getFirestore(fbApp); }
+
+/* =====================================================================
+   1. 상수 · 기본 설정
+   ===================================================================== */
+const APP_ID = 'kangkang-note';          // 백업 파일의 app 값
+const KEY = { code: 'kk-code', me: 'kk-me', ui: 'kk-ui', draft: 'kk-draft' };
+const WINDOW_DAYS = 120;                  // 평소에 불러오는 기록 기간(읽기 횟수 절약)
+const MAX_PHOTOS = 3;
+const PHOTO_MAX_CHARS = 230000;           // 사진 1장 목표 크기(약 170KB)
+const QUOTA_BYTES = 1024 * 1024 * 1024;   // 무료 1GiB
+const TYPES = {
+  poop:    { ic: '💩', nm: '배변' },
+  health:  { ic: '🩺', nm: '건강' },
+  meal:    { ic: '🍖', nm: '식사' },
+  walk:    { ic: '🦮', nm: '활동' },
+  expense: { ic: '💳', nm: '지출' },
+  memo:    { ic: '📝', nm: '메모' }
+};
+const PHOTO_TYPES = ['poop', 'health', 'memo'];
+const DEFAULT_CFG = {
+  scores: [
+    { n: 1, label: '아주 단단해요', tone: 'warn' },
+    { n: 2, label: '이상적이에요', tone: 'good' },
+    { n: 3, label: '조금 무르고 질어요', tone: 'warn' },
+    { n: 4, label: '묽어요', tone: 'bad' },
+    { n: 5, label: '설사에 가까워요', tone: 'bad' }
+  ],
+  colors: [
+    { name: '갈색', tone: 'good' }, { name: '진갈색', tone: 'good' },
+    { name: '노란색', tone: 'warn' }, { name: '녹색', tone: 'warn' },
+    { name: '검은색', tone: 'bad' }, { name: '붉은기', tone: 'bad' }, { name: '회백색', tone: 'bad' }
+  ],
+  health: [
+    { name: '체중', days: 0 }, { name: '병원진료', days: 0 }, { name: '접종', days: 365 },
+    { name: '심장사상충약', days: 30 }, { name: '구충', days: 30 }, { name: '투약', days: 0 }, { name: '증상', days: 0 }
+  ],
+  mealKinds: ['사료', '간식', '영양제', '기타'],
+  reactions: ['잘 먹음', '보통', '거부', '탈 남'],
+  amounts: ['적음', '보통', '많음'],
+  expCats: ['사료', '간식', '병원비', '용품', '미용', '기타'],
+  target: { poop: 2, walkMin: 60, wMin: 0, wMax: 0 }
+};
+const TONE_RANK = { good: 0, warn: 1, bad: 2 };
+const TONE_LABEL = { good: '정상', warn: '관찰', bad: '주의' };
+
+/* =====================================================================
+   2. 공통 유틸
+   ===================================================================== */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const pad = n => String(n).padStart(2, '0');
+const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const hm = d => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const pd = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+const today = () => ymd(new Date());
+const addDays = (s, n) => { const d = pd(s); d.setDate(d.getDate() + n); return ymd(d); };
+const diffDays = (a, b) => Math.round((pd(a) - pd(b)) / 86400000);
+const WD = ['일', '월', '화', '수', '목', '금', '토'];
+const fmtD = s => { const d = pd(s); return `${d.getMonth() + 1}/${d.getDate()}(${WD[d.getDay()]})`; };
+const won = n => Math.round(n).toLocaleString('ko-KR') + '원';
+const num = v => { const n = parseFloat(String(v ?? '').replace(/,/g, '')); return isNaN(n) ? 0 : n; };
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const mb = b => (b / 1048576).toFixed(b < 10485760 ? 1 : 0) + 'MB';
+const clone = o => JSON.parse(JSON.stringify(o));
+const cmpDesc = (a, b) => (b.date + (b.time || '')).localeCompare(a.date + (a.time || '')) || (b.at || 0) - (a.at || 0);
+const cmpAsc = (a, b) => cmpDesc(b, a);
+const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { } };
+const lsDel = k => { try { localStorage.removeItem(k); } catch (e) { } };
+const ageText = b => {
+  if (!b) return '';
+  const d = pd(b), n = new Date();
+  let m = (n.getFullYear() - d.getFullYear()) * 12 + n.getMonth() - d.getMonth();
+  if (n.getDate() < d.getDate()) m--;
+  if (m < 0) return '';
+  const y = Math.floor(m / 12);
+  return y ? `${y}살 ${m % 12}개월` : `${m}개월`;
+};
+const genCode = () => {
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', b = new Uint8Array(10);
+  crypto.getRandomValues(b);
+  return [...b].map(x => A[x % A.length]).join('');
+};
+const showCode = c => c.slice(0, 5) + '-' + c.slice(5);
+const normCode = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+/* =====================================================================
+   3. 전역 상태
+   ===================================================================== */
+let CODE = lsGet(KEY.code) || '';
+let ME = lsGet(KEY.me) || '';
+let FAM = null;                 // 가족 문서(강아지 정보, 구성원, 설정, 마지막 기록일, 사용량)
+let FAM_GONE = false;
+let BOOTED = false;
+let AUTH_ERR = '';
+const RECS = new Map();         // 기록(최근 N일 + 체중 전체 + 불러온 이전 기록)
+let WIN_FROM = '';
+let UI = (() => { try { return JSON.parse(lsGet(KEY.ui)) || {}; } catch (e) { return {}; } })();
+UI.scroll = UI.scroll || {};
+let unsubs = [];
+let PENDING = false;
+let FORM = null, TABLE = null;
+let SET = { mode: '', fam: null, code: '' };
+let FILTER = { tan: false };
+
+const saveUI = () => lsSet(KEY.ui, JSON.stringify(UI));
+const cfg = () => {
+  const f = (FAM && FAM.cfg) || {};
+  const o = { ...DEFAULT_CFG, ...f };
+  o.target = { ...DEFAULT_CFG.target, ...(f.target || {}) };
+  return o;
+};
+const isAdmin = () => !!FAM && FAM.admin === ME;
+const famRef = () => doc(db, 'families', CODE);
+const fcol = n => collection(db, 'families', CODE, n);
+const recRef = id => doc(db, 'families', CODE, 'records', id);
+const phRef = id => doc(db, 'families', CODE, 'photos', id);
+const famSet = o => setDoc(famRef(), o, { merge: true }).catch(fail);
+
+/* =====================================================================
+   4. 알림·모달·내비게이션
+   ===================================================================== */
+let toastT = 0;
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg; t.style.display = 'block';
+  clearTimeout(toastT); toastT = setTimeout(() => t.style.display = 'none', 2600);
+}
+let lastFail = 0;
+function fail(e) {
+  console.error(e);
+  if (Date.now() - lastFail < 3000) return;
+  lastFail = Date.now();
+  toast(e && e.code === 'permission-denied'
+    ? '권한 오류예요. Firestore 보안 규칙을 확인해 주세요'
+    : '저장 중 문제가 생겼어요. 연결을 확인해 주세요');
+}
+function prog(msg) {
+  const p = $('#prog');
+  if (!msg) { p.style.display = 'none'; return; }
+  $('#progt').textContent = msg; p.style.display = 'flex';
+}
+
+/* 모달: 열 때 pushState, 닫을 때 history.back() → 모바일 뒤로가기는 모달만 닫음 */
+const MODALS = [];
+let SKIP_POP = 0;
+function openM(html, onClose) {
+  const bg = document.createElement('div');
+  bg.className = 'mbg';
+  bg.innerHTML = `<div class="sheet">${html}</div>`;
+  bg.addEventListener('click', e => { if (e.target === bg) closeM(); });
+  document.body.appendChild(bg);
+  document.body.classList.add('lock');
+  MODALS.push({ bg, onClose });
+  history.pushState({ r: 'modal' }, '');
+  return bg.querySelector('.sheet');
+}
+function closeM(viaPop) {
+  const m = MODALS.pop();
+  if (!m) return;
+  m.bg.remove();
+  if (!MODALS.length) document.body.classList.remove('lock');
+  if (m.onClose) m.onClose();
+  if (!viaPop) { SKIP_POP++; history.back(); }
+  if (!MODALS.length && PENDING) { PENDING = false; scheduleRender(); }
+}
+function ask(msg, ok = '확인', danger = false) {
+  return new Promise(res => {
+    let done = false;
+    const s = openM(`<p class="msg">${esc(msg)}</p><div class="row"><button class="btn ghost" data-a="no">취소</button><button class="btn ${danger ? 'red' : ''}" data-a="yes">${esc(ok)}</button></div>`,
+      () => { if (!done) { done = true; res(false); } });
+    s.addEventListener('click', e => {
+      const a = e.target.dataset && e.target.dataset.a;
+      if (!a) return;
+      done = true; res(a === 'yes'); closeM();
+    });
+  });
+}
+
+/* 앱 종료 확인: 홈에서 뒤로가기를 누르면 '한 번 더' 안내 */
+let exitArmed = false;
+window.addEventListener('popstate', e => {
+  if (SKIP_POP > 0) { SKIP_POP--; return; }
+  if (MODALS.length) { closeM(true); return; }
+  if (e.state && e.state.r === 'exit') {
+    if (exitArmed) { history.back(); return; }
+    exitArmed = true; toast('한 번 더 누르면 종료돼요');
+    setTimeout(() => exitArmed = false, 2000);
+    history.pushState({ r: 'app' }, '', location.hash || '#/');
+  }
+});
+window.addEventListener('hashchange', () => { if (!MODALS.length) route(true); });
+
+/* =====================================================================
+   5. 사진 (축소 · 저장 · 삭제)
+   ===================================================================== */
+function loadImg(file) {
+  return new Promise((res, rej) => {
+    const u = URL.createObjectURL(file), i = new Image();
+    i.onload = () => { URL.revokeObjectURL(u); res(i); };
+    i.onerror = () => { URL.revokeObjectURL(u); rej(new Error('이미지를 읽지 못했어요')); };
+    i.src = u;
+  });
+}
+async function compress(file) {
+  const img = await loadImg(file);
+  const enc = (max, q) => {
+    const k = Math.min(1, max / Math.max(img.width, img.height));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(img.width * k));
+    c.height = Math.max(1, Math.round(img.height * k));
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', q);
+  };
+  let max = 1000, q = 0.74, full = enc(max, q);
+  while (full.length > PHOTO_MAX_CHARS && (q > 0.46 || max > 600)) {
+    if (q > 0.5) q -= 0.08; else max -= 100;
+    full = enc(max, q);
+  }
+  return { full, th: enc(200, 0.6) };
+}
+const addUsage = n => famSet({ usage: { photoBytes: increment(n) } });
+
+/* 기록 + 사진 저장. 서버 응답을 기다리지 않아 오프라인에서도 바로 반영됩니다. */
+function saveRec(rec, newPh, removeIds) {
+  const old = RECS.get(rec.id);
+  const oldPh = (old && old.photos) || [];
+  const photos = oldPh.filter(p => !removeIds.includes(p.id));
+  for (const f of newPh) {
+    const pid = uid();
+    photos.push({ id: pid, th: f.th, size: f.full.length });
+    setDoc(phRef(pid), { data: f.full, rid: rec.id, size: f.full.length, date: rec.date }).catch(fail);
+    addUsage(f.full.length);
+  }
+  for (const pid of removeIds) {
+    const p = oldPh.find(x => x.id === pid);
+    if (p && !p.x) { deleteDoc(phRef(pid)).catch(() => { }); addUsage(-p.size); }
+  }
+  rec.photos = photos;
+  if (!photos.length) delete rec.photos;
+  const clean = clone(rec);
+  RECS.set(rec.id, clean);
+  setDoc(recRef(rec.id), clean).catch(fail);
+  if (rec.type === 'health' && rec.kind) {
+    const cur = (FAM.last || {})[rec.kind] || '';
+    if (rec.date > cur) famSet({ last: { [rec.kind]: rec.date } });
+  }
+}
+async function recalcLast(kind) {
+  try {
+    const s = await getDocs(query(fcol('records'), where('kind', '==', kind)));
+    let m = '';
+    s.forEach(d => { const r = d.data(); if (r.type === 'health' && r.date > m) m = r.date; });
+    famSet({ last: { [kind]: m } });
+  } catch (e) { console.error(e); }
+}
+async function deleteRec(id) {
+  const r = RECS.get(id);
+  if (!r) return;
+  for (const p of (r.photos || [])) {
+    if (!p.x) { deleteDoc(phRef(p.id)).catch(() => { }); addUsage(-p.size); }
+  }
+  RECS.delete(id);
+  deleteDoc(recRef(id)).catch(fail);
+  if (r.type === 'health' && r.kind && (cfg().health.find(h => h.name === r.kind) || {}).days > 0) recalcLast(r.kind);
+  scheduleRender();
+}
+function removePhoto(rid, pid) {
+  const r = RECS.get(rid);
+  if (!r) return;
+  const p = (r.photos || []).find(x => x.id === pid);
+  if (!p) return;
+  const n = clone(r);
+  n.photos = n.photos.filter(x => x.id !== pid);
+  if (!n.photos.length) delete n.photos;
+  if (!p.x) { deleteDoc(phRef(pid)).catch(() => { }); addUsage(-p.size); }
+  RECS.set(rid, n);
+  setDoc(recRef(rid), n).catch(fail);
+  scheduleRender();
+}
+
+/* =====================================================================
+   6. ZIP 만들기/읽기 (무압축 저장 방식 - 사진은 이미 압축된 JPEG)
+   ===================================================================== */
+const CRC_T = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+  return t;
+})();
+function crc32(u8) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < u8.length; i++) c = CRC_T[(c ^ u8[i]) & 255] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+const u16 = n => [n & 255, (n >> 8) & 255];
+const u32 = n => [n & 255, (n >> 8) & 255, (n >> 16) & 255, (n >>> 24) & 255];
+function zipBuild(files) { // files: [{name, data:Uint8Array}] → Blob
+  const enc = new TextEncoder(), parts = [], cen = [];
+  let off = 0;
+  for (const f of files) {
+    const nm = enc.encode(f.name), crc = crc32(f.data), sz = f.data.length;
+    const lh = new Uint8Array([0x50, 0x4b, 3, 4, ...u16(20), ...u16(0x0800), ...u16(0), ...u16(0), ...u16(0x21),
+      ...u32(crc), ...u32(sz), ...u32(sz), ...u16(nm.length), ...u16(0)]);
+    parts.push(lh, nm, f.data);
+    cen.push(new Uint8Array([0x50, 0x4b, 1, 2, ...u16(20), ...u16(20), ...u16(0x0800), ...u16(0), ...u16(0), ...u16(0x21),
+      ...u32(crc), ...u32(sz), ...u32(sz), ...u16(nm.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(off)]), nm);
+    off += lh.length + nm.length + sz;
+  }
+  let cdSize = 0;
+  cen.forEach(c => cdSize += c.length);
+  const end = new Uint8Array([0x50, 0x4b, 5, 6, ...u16(0), ...u16(0), ...u16(files.length), ...u16(files.length), ...u32(cdSize), ...u32(off), ...u16(0)]);
+  return new Blob([...parts, ...cen, end], { type: 'application/zip' });
+}
+async function zipRead(file) {
+  const size = file.size;
+  const tail = new Uint8Array(await file.slice(Math.max(0, size - 65557), size).arrayBuffer());
+  let p = -1;
+  for (let i = tail.length - 22; i >= 0; i--) {
+    if (tail[i] === 0x50 && tail[i + 1] === 0x4b && tail[i + 2] === 5 && tail[i + 3] === 6) { p = i; break; }
+  }
+  if (p < 0) throw new Error('zip 파일이 아니에요');
+  const tv = new DataView(tail.buffer);
+  const n = tv.getUint16(p + 10, true), cdSize = tv.getUint32(p + 12, true), cdOff = tv.getUint32(p + 16, true);
+  const cdBuf = await file.slice(cdOff, cdOff + cdSize).arrayBuffer();
+  const cd = new DataView(cdBuf), cdu = new Uint8Array(cdBuf), dec = new TextDecoder();
+  const ent = new Map();
+  let q = 0;
+  for (let i = 0; i < n; i++) {
+    const method = cd.getUint16(q + 10, true), csz = cd.getUint32(q + 20, true);
+    const nl = cd.getUint16(q + 28, true), xl = cd.getUint16(q + 30, true), cl = cd.getUint16(q + 32, true);
+    const lo = cd.getUint32(q + 42, true);
+    ent.set(dec.decode(cdu.subarray(q + 46, q + 46 + nl)), { method, csz, lo });
+    q += 46 + nl + xl + cl;
+  }
+  return {
+    names: [...ent.keys()],
+    async get(name) {
+      const e = ent.get(name);
+      if (!e) return null;
+      if (e.method !== 0) throw new Error('압축된 zip은 지원하지 않아요');
+      const lh = new DataView(await file.slice(e.lo, e.lo + 30).arrayBuffer());
+      const start = e.lo + 30 + lh.getUint16(26, true) + lh.getUint16(28, true);
+      return new Uint8Array(await file.slice(start, start + e.csz).arrayBuffer());
+    }
+  };
+}
+const dataUrlToU8 = d => {
+  const b = atob(d.slice(d.indexOf(',') + 1)), u = new Uint8Array(b.length);
+  for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i);
+  return u;
+};
+const u8ToDataUrl = u => new Promise(res => {
+  const fr = new FileReader();
+  fr.onload = () => res(fr.result);
+  fr.readAsDataURL(new Blob([u], { type: 'image/jpeg' }));
+});
+function download(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/* =====================================================================
+   7. 데이터 동기화 (Firestore 실시간 구독)
+   ===================================================================== */
+function applyChanges(snap, weightOnly) {
+  snap.docChanges().forEach(ch => {
+    const id = ch.doc.id;
+    if (ch.type === 'removed') {
+      const r = RECS.get(id);
+      if (weightOnly && r && r.date >= WIN_FROM) return; // 최근 기간 구독이 계속 담당
+      RECS.delete(id);
+    } else RECS.set(id, { ...ch.doc.data(), id });
+  });
+  scheduleRender();
+}
+function startSync() {
+  unsubs.forEach(f => f()); unsubs = [];
+  FAM_GONE = false;
+  unsubs.push(onSnapshot(famRef(), s => {
+    if (s.exists()) { FAM = s.data(); }
+    else if (!s.metadata.fromCache) { FAM = null; FAM_GONE = true; }
+    scheduleRender();
+  }, e => { console.error(e); AUTH_ERR = e.code === 'permission-denied' ? 'rules' : 'net'; scheduleRender(); }));
+  WIN_FROM = addDays(today(), -WINDOW_DAYS);
+  unsubs.push(onSnapshot(query(fcol('records'), where('date', '>=', WIN_FROM)), s => applyChanges(s, false), fail));
+  unsubs.push(onSnapshot(query(fcol('records'), where('weight', '>', 0)), s => applyChanges(s, true), fail));
+}
+async function extendBack() {
+  const to = addDays(WIN_FROM, -1);
+  const from = addDays(WIN_FROM, -WINDOW_DAYS);
+  prog('이전 기록 불러오는 중…');
+  try {
+    const s = await getDocs(query(fcol('records'), where('date', '>=', from), where('date', '<=', to)));
+    s.forEach(d => RECS.set(d.id, { ...d.data(), id: d.id }));
+    UI.olderTo = from; // 화면 표시용
+    toast(`${s.size}건 불러왔어요`);
+  } catch (e) { fail(e); }
+  prog('');
+  loadedBack = from; scheduleRender();
+}
+let loadedBack = '';
+
+let RT = 0;
+function scheduleRender() {
+  clearTimeout(RT);
+  RT = setTimeout(() => { if (MODALS.length) { PENDING = true; return; } render(); }, 120);
+}
+
+/* =====================================================================
+   8. 화면 계산 도우미
+   ===================================================================== */
+const scoreInfo = n => cfg().scores.find(s => +s.n === +n) || { n, label: n + '점', tone: 'warn' };
+const colorTone = name => (cfg().colors.find(c => c.name === name) || { tone: 'good' }).tone;
+const worst = (a, b) => TONE_RANK[a] >= TONE_RANK[b] ? a : b;
+const poopTone = r => worst(scoreInfo(r.score).tone, r.color ? colorTone(r.color) : 'good');
+const reactTone = (name) => {
+  const l = cfg().reactions;
+  if (name === l[l.length - 1]) return 'bad';
+  if (name === l[0]) return 'good';
+  return name === '거부' ? 'warn' : '';
+};
+function sumRec(r) {
+  const T = TYPES[r.type];
+  if (r.type === 'poop') {
+    const si = scoreInfo(r.score);
+    const flags = [r.amount, r.mucus ? '점액' : '', r.foreign ? '이물질' : '', r.memo].filter(Boolean).join(' · ');
+    return [`<span class="dot t-${poopTone(r)}"></span>${esc(si.label)} · ${esc(r.color || '')}`, flags];
+  }
+  if (r.type === 'health') {
+    return [`${esc(r.kind || '')}${r.weight ? ' ' + r.weight + 'kg' : ''}`, esc(r.memo || '')];
+  }
+  if (r.type === 'meal') {
+    const rt = reactTone(r.reaction);
+    return [`${esc(r.kind || '')} ${esc(r.name || '')}`.trim(),
+      [r.amount, r.reaction ? `<span class="${rt ? 'c-' + rt : ''}">${esc(r.reaction)}</span>` : '', esc(r.memo || '')].filter(Boolean).join(' · ')];
+  }
+  if (r.type === 'walk') return [`${r.min}분${r.km ? ' · ' + r.km + 'km' : ''}`, esc(r.memo || '')];
+  if (r.type === 'expense') return [`${esc(r.cat || '')} ${won(r.amount)}`, esc(r.memo || '')];
+  return [esc((r.text || '').slice(0, 60)), ''];
+}
+function reminders() {
+  const T = today(), out = [];
+  for (const h of cfg().health) {
+    if (!(+h.days > 0)) continue;
+    const last = (FAM.last || {})[h.name];
+    if (!last) { out.push({ name: h.name, rem: null }); continue; }
+    const due = addDays(last, +h.days);
+    out.push({ name: h.name, due, last, rem: diffDays(due, T) });
+  }
+  return out.filter(x => x.rem === null || x.rem <= 14).sort((a, b) => (a.rem ?? -999) - (b.rem ?? -999));
+}
+const dayLabel = rem => rem === null ? '기록 없음' : rem < 0 ? `D+${-rem} 지남` : rem === 0 ? '오늘' : `D-${rem}`;
+const dayTone = rem => rem === null ? '' : rem < 0 ? 'red' : rem <= 7 ? 'orange' : '';
+
+/* =====================================================================
+   9. 화면: 시작(가족 만들기 / 참여)
+   ===================================================================== */
+function viewSetup() {
+  if (AUTH_ERR === 'auth') return `<div class="card"><h2>연결 문제</h2><p class="msg">로그인에 실패했어요.\n인터넷 연결과 Firebase 설정(익명 로그인 사용 여부, 승인된 도메인)을 확인해 주세요.</p><button class="btn block" data-act="reload">다시 시도</button></div>`;
+  if (!SET.mode) return `
+    <div class="card"><h2>🐶 캉캉 노트</h2>
+      <p class="sub">반려견 기록을 가족과 함께 관리해요.</p>
+      <button class="btn block" data-act="smode" data-m="new">처음 시작하기 (가족 만들기)</button>
+      <button class="btn ghost block" data-act="smode" data-m="join">가족 코드로 참여하기</button>
+    </div>`;
+  if (SET.mode === 'new') return `
+    <div class="card"><h2>가족 만들기</h2>
+      <div class="lbl">강아지 이름</div><input id="sd" placeholder="예: 캉캉이">
+      <div class="lbl">생일 (선택)</div><input id="sb" type="date">
+      <div class="lbl">내 이름 (관리자가 돼요)</div><input id="sm" placeholder="예: 아빠">
+      <div class="lbl">다른 가족 이름 (쉼표로 구분)</div><input id="so" placeholder="예: 엄마, 형, 동생">
+      <div class="row"><button class="btn ghost" data-act="smode" data-m="">뒤로</button><button class="btn" data-act="create">만들기</button></div>
+    </div>`;
+  if (SET.fam) {
+    const ms = (SET.fam.members || []).map(m => `<button class="btn ghost block" data-act="joinas" data-n="${esc(m)}">${esc(m)}</button>`).join('');
+    return `<div class="card"><h2>누구세요?</h2><p class="sub">${esc((SET.fam.dog || {}).name || '')} 가족에 참여해요. 내 이름을 골라주세요.</p>${ms}
+      <div class="lbl">목록에 없다면 새 이름</div><input id="jn" placeholder="이름 입력"><button class="btn block" data-act="joinnew">이 이름으로 참여</button></div>`;
+  }
+  return `
+    <div class="card"><h2>가족 코드로 참여</h2>
+      <div class="lbl">가족 코드 (예: ABCDE-23456)</div><input id="jc" autocapitalize="characters" placeholder="코드 입력">
+      <div class="row"><button class="btn ghost" data-act="smode" data-m="">뒤로</button><button class="btn" data-act="findfam">다음</button></div>
+    </div>`;
+}
+async function createFamily() {
+  const dog = $('#sd').value.trim(), bd = $('#sb').value, me = $('#sm').value.trim();
+  const others = $('#so').value.split(/[,\n]/).map(s => s.trim()).filter(Boolean);
+  if (!dog || !me) return toast('강아지 이름과 내 이름을 입력해 주세요');
+  if (!navigator.onLine) return toast('인터넷에 연결된 상태에서 만들어 주세요');
+  const code = genCode(), members = [...new Set([me, ...others])];
+  prog('가족을 만드는 중…');
+  try {
+    await setDoc(doc(db, 'families', code), {
+      dog: { name: dog, birthday: bd || '' }, members, admin: me, cfg: DEFAULT_CFG,
+      usage: { photoBytes: 0 }, last: {}, createdAt: Date.now()
+    });
+  } catch (e) { prog(''); return fail(e); }
+  prog('');
+  enterFamily(code, me);
+  openM(`<h3>가족이 만들어졌어요 🎉</h3><p class="msg">아래 가족 코드를 가족에게 알려주세요.\n(기준 화면에서 언제든 다시 볼 수 있어요)</p><div class="code">${showCode(code)}</div>
+    <div class="row"><button class="btn ghost" data-act="copycode">복사</button><button class="btn" data-act="mclose">시작하기</button></div>`);
+}
+async function findFamily() {
+  const code = normCode($('#jc').value);
+  if (code.length < 8) return toast('코드를 확인해 주세요');
+  if (!navigator.onLine) return toast('인터넷에 연결된 상태에서 참여해 주세요');
+  prog('찾는 중…');
+  try {
+    const s = await getDoc(doc(db, 'families', code));
+    prog('');
+    if (!s.exists()) return toast('해당 코드의 가족을 찾을 수 없어요');
+    SET.fam = s.data(); SET.code = code; render();
+  } catch (e) { prog(''); fail(e); }
+}
+function enterFamily(code, me) {
+  CODE = code; ME = me; lsSet(KEY.code, code); lsSet(KEY.me, me);
+  SET = { mode: '', fam: null, code: '' };
+  RECS.clear(); FAM = null;
+  startSync(); render();
+}
+async function joinAs(name) {
+  name = (name || '').trim();
+  if (!name) return toast('이름을 입력해 주세요');
+  const mem = SET.fam.members || [];
+  if (!mem.includes(name)) {
+    try { await setDoc(doc(db, 'families', SET.code), { members: [...mem, name] }, { merge: true }); } catch (e) { return fail(e); }
+  }
+  enterFamily(SET.code, name);
+}
+
+/* =====================================================================
+   10. 화면: 홈 (대시보드)
+   ===================================================================== */
+function weightChart() {
+  const c = cfg();
+  const ws = [...RECS.values()].filter(r => r.weight > 0).sort(cmpAsc).slice(-12);
+  if (!ws.length) return `<div class="empty">체중 기록이 없어요. 건강 → 체중으로 기록해 보세요</div>`;
+  const last = ws[ws.length - 1];
+  const head = `<div class="big">${last.weight}<small style="font-size:14px;font-weight:400">kg</small></div><div class="sub">${fmtD(last.date)} 기록${(c.target.wMin && c.target.wMax) ? ` · 적정 ${c.target.wMin}~${c.target.wMax}kg` : ''}</div>`;
+  if (ws.length < 2) return head;
+  const W = 300, H = 100, pl = 8, pr = 8, pt = 10, pb = 8;
+  let lo = Math.min(...ws.map(r => r.weight)), hi = Math.max(...ws.map(r => r.weight));
+  if (c.target.wMin && c.target.wMax) { lo = Math.min(lo, c.target.wMin); hi = Math.max(hi, c.target.wMax); }
+  if (hi === lo) { hi += 1; lo -= 1; }
+  const x = i => pl + (W - pl - pr) * i / (ws.length - 1);
+  const y = v => pt + (H - pt - pb) * (1 - (v - lo) / (hi - lo));
+  const pts = ws.map((r, i) => `${x(i).toFixed(1)},${y(r.weight).toFixed(1)}`).join(' ');
+  const band = (c.target.wMin && c.target.wMax)
+    ? `<rect x="0" y="${y(c.target.wMax).toFixed(1)}" width="${W}" height="${(y(c.target.wMin) - y(c.target.wMax)).toFixed(1)}" fill="var(--g)" opacity=".13"/>` : '';
+  const dots = ws.map((r, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(r.weight).toFixed(1)}" r="3.5" fill="var(--p)"/>`).join('');
+  return head + `<svg viewBox="0 0 ${W} ${H}" width="100%" style="margin-top:6px">${band}<polyline points="${pts}" fill="none" stroke="var(--p)" stroke-width="2"/>${dots}</svg>
+    <div class="sub" style="display:flex;justify-content:space-between"><span>${fmtD(ws[0].date)} ${ws[0].weight}kg</span><span>${fmtD(last.date)} ${last.weight}kg</span></div>`;
+}
+function viewHome() {
+  const T = today(), c = cfg(), all = [...RECS.values()], dog = FAM.dog || {};
+  const poops = all.filter(r => r.type === 'poop');
+  let h = `<div class="card hero"><div class="av">🐶</div><div><div class="nm">${esc(dog.name || '우리 강아지')}</div>
+    <div class="sub">${esc([ageText(dog.birthday), dog.breed].filter(Boolean).join(' · ')) || '프로필은 기준 화면에서 입력해요'}</div></div></div>`;
+  h += `<div class="quick">
+    <button data-act="new" data-type="poop"><b>💩</b>배변</button>
+    <button data-act="new" data-type="walk"><b>🦮</b>산책</button>
+    <button data-act="new" data-type="meal"><b>🍖</b>식사</button>
+    <button data-act="new" data-type="memo"><b>📝</b>메모</button></div>`;
+
+  /* 알림 배너 */
+  const bad = poops.filter(r => r.date >= addDays(T, -2) && poopTone(r) === 'bad');
+  if (bad.length) h += `<div class="banner red" data-act="gologs" data-type="poop">⚠️ 최근 3일 안에 주의 표시된 배변 기록이 ${bad.length}건 있어요. 반복되면 수의사와 상담을 고려해 보세요. 앱은 기록과 알림만 도와드려요.</div>`;
+  const lastB = FAM.lastBackup, usage = (FAM.usage || {}).photoBytes || 0;
+  if (usage >= QUOTA_BYTES * 0.7) h += `<div class="banner orange" data-act="gosettings">📦 사진 저장 공간이 ${Math.round(usage / QUOTA_BYTES * 100)}% 찼어요. 백업 후 오래된 사진을 정리해 주세요.</div>`;
+  else if ((lastB && diffDays(T, lastB) > 30) || (!lastB && all.length > 20)) h += `<div class="banner orange" data-act="gosettings">💾 ${lastB ? '마지막 백업 후 30일이 지났어요' : '아직 백업한 적이 없어요'}. 눌러서 백업해 주세요.</div>`;
+
+  /* 오늘 할 일 */
+  const rem = reminders();
+  if (rem.length) h += `<div class="card"><h2>📅 챙길 일정</h2>${rem.map(x => `
+    <div class="li"><div><b>${esc(x.name)}</b><div class="sub">${x.rem === null ? '아직 기록이 없어요' : `다음 ${fmtD(x.due)} (마지막 ${fmtD(x.last)})`}</div></div>
+    <div style="text-align:right"><span class="tag ${dayTone(x.rem)}">${dayLabel(x.rem)}</span><br><button class="btn sm ghost" style="margin-top:4px" data-act="remdone" data-kind="${esc(x.name)}">완료 기록</button></div></div>`).join('')}</div>`;
+
+  /* 오늘 배변 */
+  const tp = poops.filter(r => r.date === T).sort(cmpAsc), lastP = [...poops].sort(cmpDesc)[0];
+  h += `<div class="card"><h2>💩 오늘 배변 <small>목표 ${c.target.poop}회</small></h2>
+    <div class="big">${tp.length}<small style="font-size:15px;font-weight:400"> / ${c.target.poop}회</small></div>
+    <div class="hbar ${tp.length >= c.target.poop ? '' : 'warn'}"><i style="width:${Math.min(100, tp.length / Math.max(1, c.target.poop) * 100)}%"></i></div>
+    <div class="sub" style="margin-top:6px">${lastP ? `최근: ${fmtD(lastP.date)} ${esc(lastP.time || '')} · ${esc(scoreInfo(lastP.score).label)} · ${esc(lastP.color || '')} · ${esc(lastP.by || '')}` : '아직 기록이 없어요'}</div></div>`;
+
+  /* 최근 7일 배변 */
+  let wk = '';
+  for (let i = 6; i >= 0; i--) {
+    const d = addDays(T, -i), ps = poops.filter(r => r.date === d).sort(cmpAsc);
+    wk += `<div class="d"><div class="stk">${ps.map(p => `<span class="dot t-${poopTone(p)}"></span>`).join('')}</div><div class="lb ${i === 0 ? 'today' : ''}">${pd(d).getDate()}일</div></div>`;
+  }
+  h += `<div class="card"><h2>최근 7일 배변 <small><span class="dot t-good" style="width:9px;height:9px"></span>정상 <span class="dot t-warn" style="width:9px;height:9px"></span>관찰 <span class="dot t-bad" style="width:9px;height:9px"></span>주의</small></h2><div class="week">${wk}</div></div>`;
+
+  /* 최근 사진 */
+  const ph = [];
+  poops.sort(cmpDesc).forEach(r => (r.photos || []).forEach(p => ph.push({ r, p })));
+  if (ph.length) h += `<div class="card"><h2>📷 최근 배변 사진</h2><div class="gal">${ph.slice(0, 12).map(({ r, p }) => `
+    <button data-act="photo" data-rid="${r.id}" data-pid="${p.id}"><img src="${p.th}" alt=""><i class="t-${poopTone(r)}"></i><span>${fmtD(r.date).replace(/\(.\)/, '')}</span></button>`).join('')}</div></div>`;
+
+  /* 활동 */
+  const walks = all.filter(r => r.type === 'walk');
+  const wd = [];
+  for (let i = 6; i >= 0; i--) { const d = addDays(T, -i); wd.push({ d, m: walks.filter(r => r.date === d).reduce((a, r) => a + num(r.min), 0) }); }
+  const mx = Math.max(c.target.walkMin || 1, ...wd.map(x => x.m)), tot = wd.reduce((a, x) => a + x.m, 0);
+  h += `<div class="card"><h2>🦮 이번 주 활동 <small>목표 하루 ${c.target.walkMin}분</small></h2>
+    <div class="sub" style="margin-bottom:6px">최근 7일 합계 <b>${tot}분</b> · 하루 평균 ${Math.round(tot / 7)}분</div>
+    <div class="bars"><div class="goal" style="bottom:${(c.target.walkMin / mx * 100).toFixed(0)}%"></div>
+    ${wd.map(x => `<div class="b"><div class="sub" style="font-size:10px">${x.m || ''}</div><i style="height:${(x.m / mx * 62).toFixed(0)}px"></i><div class="lb sub" style="font-size:11px">${pd(x.d).getDate()}</div></div>`).join('')}</div></div>`;
+
+  /* 체중 */
+  h += `<div class="card"><h2>⚖️ 체중</h2>${weightChart()}</div>`;
+
+  /* 이번 달 지출 */
+  const ym = T.slice(0, 7), ex = all.filter(r => r.type === 'expense' && r.date.startsWith(ym));
+  const byCat = {};
+  ex.forEach(r => byCat[r.cat || '기타'] = (byCat[r.cat || '기타'] || 0) + num(r.amount));
+  const tt = Object.values(byCat).reduce((a, b) => a + b, 0);
+  h += `<div class="card"><h2>💳 이번 달 지출 <small>${won(tt)}</small></h2>${tt ? Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([k, v]) => `
+    <div style="margin-top:6px"><div style="display:flex;justify-content:space-between"><span>${esc(k)}</span><b>${won(v)}</b></div><div class="hbar"><i style="width:${(v / tt * 100).toFixed(0)}%"></i></div></div>`).join('') : '<div class="empty">이번 달 지출 기록이 없어요</div>'}</div>`;
+
+  /* 최근 기록 */
+  const feed = all.sort(cmpDesc).slice(0, 6);
+  h += `<div class="card"><h2>🕘 최근 기록</h2>${feed.length ? feed.map(r => {
+    const [t, s] = sumRec(r);
+    return `<div class="li" data-act="edit" data-id="${r.id}" style="cursor:pointer"><div><b>${TYPES[r.type].ic} ${t}</b><div class="sub">${s}</div></div><div class="sub" style="text-align:right;white-space:nowrap">${fmtD(r.date)}<br>${esc(r.by || '')}</div></div>`;
+  }).join('') : '<div class="empty">아직 기록이 없어요. 위 버튼으로 시작해 보세요</div>'}</div>`;
+  return h;
+}
+
+/* =====================================================================
+   11. 화면: 관리 (기록 입력/목록)
+   ===================================================================== */
+function recCard(r, extra) {
+  const [t, s] = sumRec(r);
+  const th = (r.photos || []).map(p => `<img class="th" src="${p.th}" alt="" data-act="photo" data-rid="${r.id}" data-pid="${p.id}">`).join('');
+  return `<div class="rec ${UI.flash === r.id ? 'flash' : ''}" data-act="edit" data-id="${r.id}">
+    <div class="rt"><b>${t}</b><span class="by">${esc(r.time || '')} · ${esc(r.by || '')}</span></div>
+    ${(s || extra) ? `<div class="rs">${s}${extra ? `<br>${extra}` : ''}</div>` : ''}
+    ${th ? `<div>${th}</div>` : ''}
+    ${isAdmin() ? `<button class="del" data-act="del" data-id="${r.id}">삭제</button>` : ''}</div>`;
+}
+function viewLog(type) {
+  UI.log = type; saveUI();
+  const chips = Object.entries(TYPES).map(([k, v]) => `<a class="chip ${k === type ? 'on' : ''}" href="#/log/${k}">${v.ic} ${v.nm}</a>`).join('');
+  let list = [...RECS.values()].filter(r => r.type === type).sort(cmpDesc);
+  let h = `<div class="chips scroll">${chips}</div>`;
+  if (type === 'meal') h += `<label class="ck" style="margin:0 0 8px"><input type="checkbox" data-act="ftan" ${FILTER.tan ? 'checked' : ''}> '${esc(cfg().reactions[cfg().reactions.length - 1])}' 기록만 보기</label>`;
+  if (type === 'meal' && FILTER.tan) list = list.filter(r => reactTone(r.reaction) === 'bad');
+  if (type === 'expense') {
+    const ym = today().slice(0, 7), t = list.filter(r => r.date.startsWith(ym)).reduce((a, r) => a + num(r.amount), 0);
+    h += `<div class="card"><div class="sub">이번 달 합계</div><div class="big">${won(t)}</div></div>`;
+  }
+  const poopsBy = {};
+  if (type === 'meal') [...RECS.values()].filter(r => r.type === 'poop').forEach(r => (poopsBy[r.date] = poopsBy[r.date] || []).push(r));
+  if (!list.length) h += `<div class="empty">${TYPES[type].nm} 기록이 없어요</div>`;
+  let cur = '', body = '';
+  list.forEach(r => {
+    if (r.date !== cur) {
+      cur = r.date;
+      const same = list.filter(x => x.date === cur);
+      let note = '';
+      if (type === 'poop') note = `${same.length}회`;
+      else if (type === 'walk') note = `${same.reduce((a, x) => a + num(x.min), 0)}분`;
+      else if (type === 'expense') note = won(same.reduce((a, x) => a + num(x.amount), 0));
+      body += `<div class="dh"><span>${fmtD(cur)}${cur === today() ? ' · 오늘' : ''}</span><span>${note}</span></div>`;
+    }
+    let extra = '';
+    if (type === 'meal') {
+      const ps = poopsBy[r.date];
+      extra = ps && ps.length ? `<span class="sub">그날 배변 ${ps.length}회 · 평균 ${(ps.reduce((a, x) => a + x.score, 0) / ps.length).toFixed(1)}점</span>` : '';
+    }
+    body += recCard(r, extra);
+  });
+  h += body;
+  h += `<button class="btn ghost block" data-act="older">⏪ 이전 기록 더 불러오기 <span class="sub">(현재 ${loadedBack || WIN_FROM} 부터)</span></button>`;
+  return h;
+}
+
+/* ---- 입력 폼 ---- */
+const chipsHtml = (f, list, sel, opt) => `<div class="chips" data-f="${f}" ${opt ? 'data-opt="1"' : ''}>${list.map(x => `<button type="button" class="chip ${x === sel ? 'on' : ''}" data-act="chip" data-v="${esc(x)}">${esc(x)}</button>`).join('')}</div>`;
+const FORMS = {
+  poop: (v, c) => `
+    <div class="two"><div><div class="lbl">날짜</div><input type="date" name="date" value="${v.date}"></div><div><div class="lbl">시간</div><input type="time" name="time" value="${v.time || ''}"></div></div>
+    <div class="lbl">변 상태</div><div class="chips" data-f="score" style="display:block">${c.scores.map(s => `<button type="button" class="scorebtn ${+v.score === +s.n ? 'on' : ''}" data-act="chip" data-v="${s.n}"><b>${s.n}</b><span class="dot t-${s.tone}"></span>${esc(s.label)}</button>`).join('')}</div>
+    <div class="lbl">색</div>${chipsHtml('color', c.colors.map(x => x.name), v.color || (c.colors[0] || {}).name)}
+    <div class="lbl">양</div>${chipsHtml('amount', c.amounts, v.amount, true)}
+    <label class="ck"><input type="checkbox" name="mucus" ${v.mucus ? 'checked' : ''}> 점액이 보여요</label>
+    <label class="ck"><input type="checkbox" name="foreign" ${v.foreign ? 'checked' : ''}> 이물질(풀·털·조각 등)이 보여요</label>
+    <div class="lbl">메모</div><textarea name="memo">${esc(v.memo || '')}</textarea>`,
+  health: (v, c) => `
+    <div class="lbl">날짜</div><input type="date" name="date" value="${v.date}">
+    <div class="lbl">항목</div>${chipsHtml('kind', c.health.map(h => h.name), v.kind)}
+    <div class="lbl">체중 (kg, 체중 항목일 때)</div><input name="weight" inputmode="decimal" value="${v.weight || ''}" placeholder="예: 5.4">
+    <div class="lbl">메모 (병원 이름, 약 이름, 증상 등)</div><textarea name="memo">${esc(v.memo || '')}</textarea>`,
+  meal: (v, c) => `
+    <div class="two"><div><div class="lbl">날짜</div><input type="date" name="date" value="${v.date}"></div><div><div class="lbl">시간</div><input type="time" name="time" value="${v.time || ''}"></div></div>
+    <div class="lbl">종류</div>${chipsHtml('kind', c.mealKinds, v.kind || c.mealKinds[0])}
+    <div class="lbl">이름 (사료·간식 이름)</div><input name="name" list="mealnames" value="${esc(v.name || '')}" placeholder="예: 사슴고기 육포">
+    <datalist id="mealnames">${[...new Set([...RECS.values()].filter(r => r.type === 'meal' && r.name).map(r => r.name))].slice(0, 40).map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+    <div class="lbl">먹은 양 (선택)</div><input name="amount" value="${esc(v.amount || '')}" placeholder="예: 반 컵, 2개">
+    <div class="lbl">반응</div>${chipsHtml('reaction', c.reactions, v.reaction, true)}
+    <div class="lbl">메모</div><textarea name="memo">${esc(v.memo || '')}</textarea>`,
+  walk: v => `
+    <div class="two"><div><div class="lbl">날짜</div><input type="date" name="date" value="${v.date}"></div><div><div class="lbl">시간</div><input type="time" name="time" value="${v.time || ''}"></div></div>
+    <div class="two"><div><div class="lbl">시간 (분)</div><input name="min" inputmode="numeric" value="${v.min || ''}" placeholder="30"></div><div><div class="lbl">거리 (km, 선택)</div><input name="km" inputmode="decimal" value="${v.km || ''}" placeholder="1.5"></div></div>
+    <div class="lbl">메모</div><textarea name="memo">${esc(v.memo || '')}</textarea>`,
+  expense: (v, c) => `
+    <div class="lbl">날짜</div><input type="date" name="date" value="${v.date}">
+    <div class="lbl">분류</div>${chipsHtml('cat', c.expCats, v.cat)}
+    <div class="lbl">금액 (원)</div><input name="amount" inputmode="numeric" value="${v.amount ? Number(v.amount).toLocaleString('ko-KR') : ''}" placeholder="예: 35,000">
+    <div class="lbl">메모</div><textarea name="memo">${esc(v.memo || '')}</textarea>`,
+  memo: v => `
+    <div class="lbl">날짜</div><input type="date" name="date" value="${v.date}">
+    <div class="lbl">내용</div><textarea name="text" style="min-height:110px">${esc(v.text || '')}</textarea>`
+};
+function photoBox(v) {
+  const ex = (v.photos || []).map(p => `<div class="ph"><img src="${p.th}" alt=""><button type="button" data-act="phdel" data-pid="${p.id}">×</button></div>`).join('');
+  return `<div class="lbl">사진 (최대 ${MAX_PHOTOS}장, 자동으로 줄여서 저장돼요)</div><div class="phs" id="phs">${ex}</div>
+    <button type="button" class="btn ghost sm" data-act="phadd">📷 사진 추가</button><input type="file" id="pf" accept="image/*" multiple hidden>`;
+}
+function openForm(type, id, preset) {
+  const old = id ? RECS.get(id) : null;
+  const c = cfg();
+  const v = old ? clone(old) : { type, date: today(), time: hm(new Date()), ...(preset || {}) };
+  const s = openM(`<h3>${TYPES[type].ic} ${TYPES[type].nm} ${old ? '수정' : '기록'}</h3>
+    <div id="fm" data-type="${type}">${FORMS[type](v, c)}${PHOTO_TYPES.includes(type) ? photoBox(v) : ''}</div>
+    <div class="row"><button class="btn ghost" data-act="mclose">취소</button><button class="btn" data-act="save">저장</button></div>`,
+    () => { FORM = null; });
+  FORM = { type, id: old ? old.id : null, old, newPh: [], removed: [], sheet: s };
+  if (!old) { // 임시저장 복원 (같은 종류의 새 기록 입력 중 앱이 닫힌 경우)
+    try {
+      const d = JSON.parse(lsGet(KEY.draft) || 'null');
+      if (d && d.type === type && Date.now() - d.t < 6 * 3600e3 && !preset) applyDraft(s, d.v);
+    } catch (e) { }
+  }
+  let dt = 0;
+  s.addEventListener('input', () => {
+    if (old) return;
+    clearTimeout(dt);
+    dt = setTimeout(() => lsSet(KEY.draft, JSON.stringify({ type, t: Date.now(), v: collect(s) })), 300);
+  });
+}
+function collect(s) {
+  const o = {};
+  s.querySelectorAll('[name]').forEach(el => { o[el.name] = el.type === 'checkbox' ? el.checked : el.value; });
+  s.querySelectorAll('.chips[data-f]').forEach(ch => { const on = ch.querySelector('.on'); o[ch.dataset.f] = on ? on.dataset.v : ''; });
+  return o;
+}
+function applyDraft(s, d) {
+  s.querySelectorAll('[name]').forEach(el => {
+    if (!(el.name in d) || el.name === 'date' || el.name === 'time') return;
+    if (el.type === 'checkbox') el.checked = !!d[el.name]; else el.value = d[el.name];
+  });
+  s.querySelectorAll('.chips[data-f]').forEach(ch => {
+    const f = ch.dataset.f;
+    if (!(f in d)) return;
+    ch.querySelectorAll('[data-v]').forEach(b => b.classList.toggle('on', b.dataset.v === d[f]));
+  });
+}
+function submitForm() {
+  if (!FORM) return;
+  const { type, old, newPh, removed, sheet } = FORM;
+  const o = collect(sheet);
+  if (!o.date) return toast('날짜를 입력해 주세요');
+  const rec = old ? clone(old) : { id: uid(), type, by: ME, at: Date.now() };
+  rec.type = type; rec.date = o.date;
+  if (o.time !== undefined) rec.time = o.time;
+  if (type === 'poop') {
+    if (!o.score) return toast('변 상태를 골라 주세요');
+    Object.assign(rec, { score: +o.score, color: o.color || '', amount: o.amount || '', mucus: !!o.mucus, foreign: !!o.foreign, memo: o.memo.trim() });
+  } else if (type === 'health') {
+    if (!o.kind) return toast('항목을 골라 주세요');
+    rec.kind = o.kind; rec.memo = o.memo.trim();
+    const w = num(o.weight);
+    if (w > 0) rec.weight = w; else delete rec.weight;
+    if (o.kind === '체중' && !(w > 0)) return toast('체중을 입력해 주세요');
+  } else if (type === 'meal') {
+    Object.assign(rec, { kind: o.kind || '', name: o.name.trim(), amount: o.amount.trim(), reaction: o.reaction || '', memo: o.memo.trim() });
+    if (!rec.name && !rec.memo) return toast('이름이나 메모를 입력해 주세요');
+  } else if (type === 'walk') {
+    const m = num(o.min);
+    if (!(m > 0)) return toast('산책 시간(분)을 입력해 주세요');
+    Object.assign(rec, { min: m, memo: o.memo.trim() });
+    const km = num(o.km);
+    if (km > 0) rec.km = km; else delete rec.km;
+  } else if (type === 'expense') {
+    const a = num(o.amount);
+    if (!(a > 0)) return toast('금액을 입력해 주세요');
+    Object.assign(rec, { cat: o.cat || '기타', amount: a, memo: o.memo.trim() });
+  } else if (type === 'memo') {
+    const keep = (rec.photos || []).filter(p => !removed.includes(p.id)).length + newPh.length;
+    if (!o.text.trim() && !keep) return toast('내용이나 사진을 넣어 주세요');
+    rec.text = o.text.trim();
+  }
+  if (old && old.by !== ME) rec.editedBy = ME;
+  saveRec(rec, newPh, removed);
+  lsDel(KEY.draft);
+  UI.flash = rec.id; saveUI();
+  closeM(); toast('저장했어요');
+  setTimeout(() => { UI.flash = ''; }, 2200);
+  scheduleRender();
+}
+async function pickPhotos(input) {
+  if (!FORM) return;
+  const have = $('#phs').children.length;
+  const room = MAX_PHOTOS - have;
+  const files = [...input.files].slice(0, Math.max(0, room));
+  input.value = '';
+  if (!files.length) return toast(`사진은 최대 ${MAX_PHOTOS}장까지예요`);
+  prog('사진 처리 중…');
+  for (const f of files) {
+    try {
+      const r = await compress(f);
+      const nid = uid();
+      FORM.newPh.push({ nid, ...r });
+      $('#phs').insertAdjacentHTML('beforeend', `<div class="ph"><img src="${r.th}" alt=""><button type="button" data-act="phdel" data-nid="${nid}">×</button></div>`);
+    } catch (e) { toast('사진을 처리하지 못했어요'); }
+  }
+  prog('');
+}
+async function openPhoto(rid, pid) {
+  const r = RECS.get(rid), p = r && (r.photos || []).find(x => x.id === pid);
+  if (!p) return;
+  const s = openM(`<div class="pv"><img id="pvi" src="${p.th}" alt=""><div class="sub" id="pvs" style="margin-top:6px">불러오는 중…</div></div>
+    <div class="row">${isAdmin() ? `<button class="btn red" data-act="phrm" data-rid="${rid}" data-pid="${pid}">사진 삭제</button>` : ''}<button class="btn ghost" data-act="mclose">닫기</button></div>`);
+  const cap = `${fmtD(r.date)} ${r.time || ''} · ${r.by || ''}`;
+  if (p.x) { s.querySelector('#pvs').textContent = `${cap}\n원본은 백업 후 정리되어 작은 사진만 남아 있어요`; return; }
+  try {
+    const d = await getDoc(phRef(pid));
+    if (d.exists()) { s.querySelector('#pvi').src = d.data().data; s.querySelector('#pvs').textContent = cap; }
+    else s.querySelector('#pvs').textContent = `${cap}\n원본을 찾을 수 없어요`;
+  } catch (e) { s.querySelector('#pvs').textContent = `${cap}\n오프라인이라 원본을 못 불러왔어요`; }
+}
+
+/* =====================================================================
+   12. 화면: 기준 (설정)
+   ===================================================================== */
+function usageBar() {
+  const u = (FAM.usage || {}).photoBytes || 0, pct = Math.min(100, u / QUOTA_BYTES * 100);
+  return `<div class="sub">사진 사용량(추정) ${mb(Math.max(0, u))} / 1,024MB (${pct.toFixed(1)}%)</div>
+    <div class="hbar ${pct >= 85 ? 'bad' : pct >= 70 ? 'warn' : ''}"><i style="width:${pct}%"></i></div>`;
+}
+function viewSet() {
+  const c = cfg(), dog = FAM.dog || {}, adm = isAdmin();
+  const lock = adm ? '' : 'disabled';
+  const edit = (act, label) => `<button class="btn ghost sm" data-act="${act}" ${lock}>${label}</button>`;
+  let h = `<div class="card"><h2>🐶 강아지 프로필 ${edit('eprofile', '수정')}</h2>
+    <div><b>${esc(dog.name || '')}</b> ${esc(dog.breed || '')}</div><div class="sub">생일 ${esc(dog.birthday || '-')} ${ageText(dog.birthday) ? '(' + ageText(dog.birthday) + ')' : ''}</div></div>`;
+  h += `<div class="card"><h2>👨‍👩‍👧 가족</h2>
+    <div class="code" style="font-size:20px">${showCode(CODE)}</div>
+    <div class="row" style="margin-top:0"><button class="btn ghost sm" data-act="copycode">코드 복사</button></div>
+    ${(FAM.members || []).map(m => `<div class="li"><span>${esc(m)} ${m === FAM.admin ? '<span class="tag orange">관리자</span>' : ''} ${m === ME ? '<span class="tag green">나</span>' : ''}</span>
+      <span>${adm && m !== FAM.admin ? `<button class="btn sm ghost" data-act="mkadmin" data-n="${esc(m)}">관리자로</button> <button class="btn sm ghost" data-act="rmmember" data-n="${esc(m)}">삭제</button>` : ''}</span></div>`).join('')}
+    <div class="row">${edit('addmember', '＋ 가족 추가')}<button class="btn ghost sm" data-act="switchme">내 이름 바꾸기</button></div>
+    ${adm ? '' : '<div class="sub" style="margin-top:8px">삭제와 기준 수정은 관리자(' + esc(FAM.admin) + ')만 할 수 있어요.</div>'}</div>`;
+  h += `<div class="card"><h2>🎯 목표 · 적정 체중 ${edit('etarget', '수정')}</h2>
+    <div class="sub">하루 배변 ${c.target.poop}회 · 하루 산책 ${c.target.walkMin}분 · 적정 체중 ${c.target.wMin && c.target.wMax ? c.target.wMin + '~' + c.target.wMax + 'kg' : '미설정'}</div></div>`;
+  h += `<div class="card"><h2>📋 기준 목록</h2>
+    ${[['escores', '변 상태 점수', c.scores.map(s => s.n + '.' + s.label).join(' / ')],
+      ['ecolors', '변 색 (정상·관찰·주의)', c.colors.map(x => x.name).join(', ')],
+      ['ehealth', '건강 항목 · 정기 주기(일)', c.health.map(x => x.name + (x.days > 0 ? `(${x.days}일)` : '')).join(', ')],
+      ['emeal', '식사 종류', c.mealKinds.join(', ')],
+      ['ereact', '먹은 후 반응', c.reactions.join(', ')],
+      ['eamount', '변 양', c.amounts.join(', ')],
+      ['ecats', '지출 분류', c.expCats.join(', ')]].map(([a, t, d]) => `
+      <div class="li"><div style="min-width:0"><b>${t}</b><div class="sub" style="word-break:break-all">${esc(d)}</div></div>${edit(a, '수정')}</div>`).join('')}</div>`;
+  h += `<div class="card"><h2>💾 사진 · 백업</h2>${usageBar()}
+    <div class="sub" style="margin-top:6px">마지막 백업: ${FAM.lastBackup ? fmtD(FAM.lastBackup) + ' (' + diffDays(today(), FAM.lastBackup) + '일 전)' : '없음'}</div>
+    <button class="btn block" data-act="backup">백업 내려받기</button>
+    <button class="btn ghost block" data-act="restore">백업에서 복구</button><input type="file" id="rf" accept=".zip,.json" multiple hidden>
+    <button class="btn ghost block" data-act="cleanup" ${lock}>백업 후 오래된 사진 정리 (관리자)</button>
+    <button class="btn ghost block" data-act="recount">사용량 정확히 다시 계산</button>
+    <div class="sub" style="margin-top:10px">데이터는 가족 공용 서버(Firestore)에 저장돼요. 그래도 백업 파일은 가끔 따로 보관해 주세요.</div></div>`;
+  return h;
+}
+
+/* ---- 범용 표 편집기 ---- */
+function openTable(o) {
+  const rows = o.rows.map(r => ({ ...r }));
+  const s = openM(`<h3>${esc(o.title)}</h3>${o.hint ? `<p class="sub">${esc(o.hint)}</p>` : ''}<div id="tb"></div>
+    ${o.fixed ? '' : '<button class="btn ghost sm" data-act="tadd">＋ 추가</button>'}
+    <div class="row"><button class="btn ghost" data-act="mclose">취소</button><button class="btn" data-act="tsave">저장</button></div>`, () => { TABLE = null; });
+  const draw = () => {
+    s.querySelector('#tb').innerHTML = rows.map((r, i) => `<div class="trow">${o.cols.map(cl => {
+      if (cl.t === 'ro') return `<span class="ro">${esc(r[cl.k])}</span>`;
+      if (cl.t === 'sel') return `<select data-i="${i}" data-k="${cl.k}" style="flex:0 0 96px">${cl.opts.map(([v, l]) => `<option value="${v}" ${r[cl.k] === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+      return `<input data-i="${i}" data-k="${cl.k}" value="${esc(r[cl.k] ?? '')}" placeholder="${esc(cl.ph || '')}" ${cl.t === 'num' ? 'inputmode="decimal" style="flex:0 0 90px"' : ''}>`;
+    }).join('')}${o.fixed ? '' : `<button class="x" data-act="tdel" data-i="${i}">×</button>`}</div>`).join('');
+  };
+  TABLE = { rows, o, draw, s };
+  draw();
+}
+const TONES = [['good', '정상'], ['warn', '관찰'], ['bad', '주의']];
+const listRows = l => l.map(name => ({ name }));
+const rowsList = r => r.map(x => String(x.name || '').trim()).filter(Boolean);
+const setCfg = o => famSet({ cfg: o });
+const EDITORS = {
+  escores: () => openTable({ title: '변 상태 점수', hint: '단계별 설명과 구분(정상/관찰/주의)을 정해요.', fixed: true, rows: cfg().scores,
+    cols: [{ k: 'n', t: 'ro' }, { k: 'label', t: 'text', ph: '설명' }, { k: 'tone', t: 'sel', opts: TONES }],
+    save: r => setCfg({ scores: r.map(x => ({ n: +x.n, label: String(x.label).trim() || x.n + '점', tone: x.tone })) }) }),
+  ecolors: () => openTable({ title: '변 색', hint: '"주의"로 지정한 색이 나오면 홈에 알림이 떠요.', rows: cfg().colors,
+    cols: [{ k: 'name', t: 'text', ph: '색 이름' }, { k: 'tone', t: 'sel', opts: TONES }],
+    save: r => setCfg({ colors: r.filter(x => String(x.name).trim()).map(x => ({ name: String(x.name).trim(), tone: x.tone })) }) }),
+  ehealth: () => openTable({ title: '건강 항목 · 정기 주기', hint: '주기(일)를 넣으면 홈에서 다음 날짜를 알려줘요. 0은 주기 없음. 이름을 바꾸면 이전 기록과 연결이 끊어지니 새 항목을 추가하는 걸 권해요.',
+    rows: cfg().health, cols: [{ k: 'name', t: 'text', ph: '항목' }, { k: 'days', t: 'num', ph: '주기(일)' }],
+    save: r => setCfg({ health: r.filter(x => String(x.name).trim()).map(x => ({ name: String(x.name).trim(), days: Math.max(0, Math.round(num(x.days))) })) }) }),
+  emeal: () => openTable({ title: '식사 종류', rows: listRows(cfg().mealKinds), cols: [{ k: 'name', t: 'text' }], save: r => setCfg({ mealKinds: rowsList(r) }) }),
+  ereact: () => openTable({ title: '먹은 후 반응', hint: '첫 항목은 좋은 반응, 마지막 항목은 나쁜 반응(예: 탈 남)으로 취급돼요.', rows: listRows(cfg().reactions), cols: [{ k: 'name', t: 'text' }], save: r => setCfg({ reactions: rowsList(r) }) }),
+  eamount: () => openTable({ title: '변 양', rows: listRows(cfg().amounts), cols: [{ k: 'name', t: 'text' }], save: r => setCfg({ amounts: rowsList(r) }) }),
+  ecats: () => openTable({ title: '지출 분류', rows: listRows(cfg().expCats), cols: [{ k: 'name', t: 'text' }], save: r => setCfg({ expCats: rowsList(r) }) })
+};
+function openProfile() {
+  const d = FAM.dog || {};
+  openM(`<h3>강아지 프로필</h3><div class="lbl">이름</div><input id="pn" value="${esc(d.name || '')}">
+    <div class="lbl">품종 (선택)</div><input id="pb" value="${esc(d.breed || '')}"><div class="lbl">생일</div><input id="pd" type="date" value="${esc(d.birthday || '')}">
+    <div class="row"><button class="btn ghost" data-act="mclose">취소</button><button class="btn" data-act="psave">저장</button></div>`);
+}
+function openTarget() {
+  const t = cfg().target;
+  openM(`<h3>목표 · 적정 체중</h3><div class="lbl">하루 배변 목표 (회)</div><input id="tp" inputmode="numeric" value="${t.poop}">
+    <div class="lbl">하루 산책 목표 (분)</div><input id="tw" inputmode="numeric" value="${t.walkMin}">
+    <div class="two"><div><div class="lbl">적정 체중 최소 (kg)</div><input id="tl" inputmode="decimal" value="${t.wMin || ''}"></div><div><div class="lbl">적정 체중 최대 (kg)</div><input id="th2" inputmode="decimal" value="${t.wMax || ''}"></div></div>
+    <p class="sub">적정 체중은 수의사에게 들은 범위를 넣어요. 비워두면 표시하지 않아요.</p>
+    <div class="row"><button class="btn ghost" data-act="mclose">취소</button><button class="btn" data-act="tgsave">저장</button></div>`);
+}
+
+/* =====================================================================
+   13. 백업 · 복구 · 사진 정리
+   ===================================================================== */
+const PART_LIMIT = 60 * 1048576;
+async function backupRange(from, to, withPhotos, label) {
+  if (!navigator.onLine) { toast('인터넷 연결이 필요해요'); return null; }
+  prog('기록 불러오는 중…');
+  let recs;
+  try {
+    const s = await getDocs(query(fcol('records'), where('date', '>=', from), where('date', '<=', to)));
+    recs = s.docs.map(d => ({ ...d.data(), id: d.id })).sort(cmpAsc);
+  } catch (e) { prog(''); fail(e); return null; }
+  const stamp = today();
+  const fam = { dog: FAM.dog, members: FAM.members, admin: FAM.admin };
+  const head = { app: APP_ID, version: 1, exportedAt: new Date().toISOString(), range: [from, to], fam };
+  if (!withPhotos) {
+    download(new Blob([JSON.stringify({ ...head, records: recs })], { type: 'application/json' }), `캉캉노트_기록_${stamp}.json`);
+    famSet({ lastBackup: stamp }); prog('');
+    toast(`기록 ${recs.length}건을 내려받았어요 (사진 원본 제외)`);
+    return recs;
+  }
+  const total = recs.reduce((a, r) => a + (r.photos || []).filter(p => !p.x).length, 0);
+  let bucket = { files: [], recs: [], bytes: 0 }, part = 0, done = 0;
+  const flush = async () => {
+    if (!bucket.recs.length) return;
+    part++;
+    const json = new TextEncoder().encode(JSON.stringify({ ...head, part, records: bucket.recs }));
+    const blob = zipBuild([{ name: 'data.json', data: json }, ...bucket.files]);
+    download(blob, `캉캉노트_${label}_${stamp}_${part}.zip`);
+    bucket = { files: [], recs: [], bytes: 0 };
+    await sleep(900);
+  };
+  try {
+    for (const r of recs) {
+      for (const p of (r.photos || [])) {
+        if (p.x) continue;
+        prog(`사진 담는 중… ${++done}/${total}`);
+        const d = await getDoc(phRef(p.id));
+        if (d.exists()) {
+          const u = dataUrlToU8(d.data().data);
+          bucket.files.push({ name: `photos/${p.id}.jpg`, data: u });
+          bucket.bytes += u.length;
+        }
+      }
+      bucket.recs.push(r);
+      if (bucket.bytes >= PART_LIMIT) await flush();
+    }
+    await flush();
+  } catch (e) { prog(''); fail(e); return null; }
+  famSet({ lastBackup: stamp }); prog('');
+  toast(`백업 ${part}개 파일을 내려받았어요`);
+  return recs;
+}
+function openBackup() {
+  const to = today(), from = addDays(to, -365);
+  openM(`<h3>백업 내려받기</h3>
+    <div class="two"><div><div class="lbl">시작일</div><input id="bf" type="date" value="${from}"></div><div><div class="lbl">종료일</div><input id="bt" type="date" value="${to}"></div></div>
+    <label class="ck"><input type="checkbox" id="bp" checked> 사진 원본 포함 (zip, 용량이 크면 여러 파일로 나뉘어요)</label>
+    <p class="sub">사진을 빼면 기록과 작은 사진(썸네일)만 담은 가벼운 json 파일이 돼요.</p>
+    <div class="row"><button class="btn ghost" data-act="mclose">취소</button><button class="btn" data-act="dobackup">내려받기</button></div>`);
+}
+async function restoreFiles(files) {
+  if (!navigator.onLine) return toast('인터넷 연결이 필요해요');
+  let nRec = 0, nPh = 0;
+  try {
+    for (const f of files) {
+      prog(`${f.name} 읽는 중…`);
+      let data, zip = null;
+      if (/\.json$/i.test(f.name)) data = JSON.parse(await f.text());
+      else { zip = await zipRead(f); const j = await zip.get('data.json'); if (!j) throw new Error('data.json이 없어요'); data = JSON.parse(new TextDecoder().decode(j)); }
+      if (data.app !== APP_ID) throw new Error('캉캉 노트 백업 파일이 아니에요');
+      const recs = data.records || [];
+      let batch = writeBatch(db), n = 0;
+      for (const r of recs) {
+        const { id, ...body } = r;
+        batch.set(recRef(id), body); n++; nRec++;
+        if (n >= 400) { await batch.commit(); batch = writeBatch(db); n = 0; prog(`기록 복구 ${nRec}건…`); }
+      }
+      if (n) await batch.commit();
+      if (zip) {
+        let pb = writeBatch(db), pn = 0;
+        for (const name of zip.names.filter(x => x.startsWith('photos/'))) {
+          const pid = name.slice(7).replace(/\.jpg$/, '');
+          const owner = recs.find(r => (r.photos || []).some(p => p.id === pid));
+          const u = await zip.get(name);
+          const dataUrl = await u8ToDataUrl(u);
+          pb.set(phRef(pid), { data: dataUrl, rid: owner ? owner.id : '', size: dataUrl.length, date: owner ? owner.date : '' });
+          pn++; nPh++;
+          if (pn >= 15) { await pb.commit(); pb = writeBatch(db); pn = 0; prog(`사진 복구 ${nPh}장…`); }
+        }
+        if (pn) await pb.commit();
+      }
+    }
+  } catch (e) { prog(''); console.error(e); return toast('복구 실패: ' + (e.message || '파일을 확인해 주세요')); }
+  prog('');
+  await recount(true);
+  toast(`복구 완료: 기록 ${nRec}건, 사진 ${nPh}장`);
+}
+async function recount(silent) {
+  if (!navigator.onLine) return silent || toast('인터넷 연결이 필요해요');
+  try {
+    const r = await getAggregateFromServer(fcol('photos'), { bytes: sum('size'), n: count() });
+    const d = r.data();
+    await setDoc(famRef(), { usage: { photoBytes: d.bytes || 0 } }, { merge: true });
+    if (!silent) toast(`사진 ${d.n || 0}장 · ${mb(d.bytes || 0)}`);
+  } catch (e) { if (!silent) fail(e); }
+}
+function openCleanup() {
+  openM(`<h3>오래된 사진 정리</h3>
+    <p class="sub">선택한 날짜 이전의 사진 원본을 먼저 백업(zip)으로 내려받고, 확인 후 서버에서 지워요. 기록과 작은 사진(썸네일)은 남아 있어요.</p>
+    <div class="lbl">이 날짜까지의 사진</div><input id="cd" type="date" value="${addDays(today(), -365)}">
+    <div class="row"><button class="btn ghost" data-act="mclose">취소</button><button class="btn" data-act="docleanup">백업하고 정리</button></div>`);
+}
+async function doCleanup(cut) {
+  const recs = await backupRange('2000-01-01', cut, true, '정리전백업');
+  if (!recs) return;
+  const targets = recs.filter(r => (r.photos || []).some(p => !p.x));
+  const cnt = targets.reduce((a, r) => a + r.photos.filter(p => !p.x).length, 0);
+  if (!cnt) return toast('정리할 사진이 없어요');
+  const bytes = targets.reduce((a, r) => a + r.photos.filter(p => !p.x).reduce((b, p) => b + p.size, 0), 0);
+  const ok = await ask(`방금 내려받은 백업 파일을 안전한 곳에 저장했나요?\n사진 원본 ${cnt}장(약 ${mb(bytes)})을 서버에서 삭제해요.\n되돌릴 수 없어요.`, '삭제하기', true);
+  if (!ok) return toast('정리를 취소했어요. 백업만 받아졌어요');
+  try {
+    let batch = writeBatch(db), n = 0, done = 0;
+    for (const r of targets) {
+      const nr = clone(r);
+      for (const p of nr.photos) {
+        if (p.x) continue;
+        batch.delete(phRef(p.id)); p.x = 1; n++; done++;
+      }
+      const { id, ...body } = nr;
+      batch.set(recRef(r.id), body); n++;
+      if (n >= 400) { await batch.commit(); batch = writeBatch(db); n = 0; prog(`정리 중… ${done}/${cnt}`); }
+    }
+    if (n) await batch.commit();
+  } catch (e) { prog(''); return fail(e); }
+  prog('');
+  await recount(true);
+  toast(`사진 ${cnt}장을 정리했어요`);
+}
+
+/* =====================================================================
+   14. 렌더링 · 라우팅
+   ===================================================================== */
+const routeParts = () => location.hash.replace(/^#\/?/, '').split('/');
+function render() {
+  if (!BOOTED) return;
+  const root = $('#app'), tabs = $('#tabs'), y = window.scrollY;
+  $('#sync').textContent = navigator.onLine ? '' : '오프라인';
+  if (!CODE || FAM_GONE || AUTH_ERR === 'auth') {
+    if (FAM_GONE) { lsDel(KEY.code); CODE = ''; }
+    tabs.style.display = 'none'; $('#ht').textContent = '🐶 캉캉 노트'; $('#ha').innerHTML = '';
+    root.innerHTML = viewSetup(); return;
+  }
+  if (!FAM) {
+    tabs.style.display = 'none';
+    root.innerHTML = AUTH_ERR === 'rules'
+      ? `<div class="card"><h2>권한 오류</h2><p class="msg">Firestore 보안 규칙이 아직 설정되지 않았어요.\nFirebase 콘솔 → Firestore → 규칙에서 안내받은 규칙을 게시해 주세요.</p><button class="btn block" data-act="reload">다시 시도</button></div>`
+      : `<div class="empty">불러오는 중…</div>`;
+    return;
+  }
+  tabs.style.display = 'flex';
+  const [r, a] = routeParts();
+  let html, tab, title, act = '';
+  if (r === 'log') { const t = TYPES[a] ? a : (TYPES[UI.log] ? UI.log : 'poop'); html = viewLog(t); tab = 'log'; title = '기록 관리'; act = `<button class="btn sm" data-act="new" data-type="${t}">＋ ${TYPES[t].nm}</button>`; }
+  else if (r === 'set') { html = viewSet(); tab = 'set'; title = '기준 설정'; }
+  else { html = viewHome(); tab = 'home'; title = `🐶 ${(FAM.dog || {}).name || '캉캉 노트'}`; }
+  root.innerHTML = html;
+  $('#ht').textContent = title; $('#ha').innerHTML = act;
+  tabs.querySelectorAll('a').forEach(x => x.classList.toggle('on', x.dataset.tab === tab));
+  window.scrollTo(0, y);
+}
+function route(fresh) {
+  if (MODALS.length) return;
+  const key = routeParts().join('/');
+  UI.route = location.hash || '#/'; saveUI();
+  render();
+  window.scrollTo(0, fresh ? (UI.scroll[key] || 0) : window.scrollY);
+}
+let scT = 0;
+window.addEventListener('scroll', () => {
+  clearTimeout(scT);
+  scT = setTimeout(() => { UI.scroll[routeParts().join('/')] = window.scrollY; saveUI(); }, 400);
+}, { passive: true });
+window.addEventListener('online', () => { $('#sync').textContent = ''; });
+window.addEventListener('offline', () => { $('#sync').textContent = '오프라인'; });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') scheduleRender(); else saveUI(); });
+window.addEventListener('pagehide', saveUI);
+
+/* =====================================================================
+   15. 클릭 · 입력 처리
+   ===================================================================== */
+const ACTS = {
+  reload: () => location.reload(),
+  mclose: () => closeM(),
+  smode: t => { SET.mode = t.dataset.m; SET.fam = null; render(); },
+  create: createFamily,
+  findfam: findFamily,
+  joinas: t => joinAs(t.dataset.n),
+  joinnew: () => joinAs($('#jn').value),
+  copycode: () => { navigator.clipboard && navigator.clipboard.writeText(showCode(CODE)).then(() => toast('코드를 복사했어요'), () => toast(showCode(CODE))); },
+  new: t => openForm(t.dataset.type),
+  edit: t => openForm(RECS.get(t.dataset.id).type, t.dataset.id),
+  remdone: t => openForm('health', null, { kind: t.dataset.kind }),
+  gologs: t => { location.hash = '#/log/' + t.dataset.type; },
+  gosettings: () => { location.hash = '#/set'; },
+  chip: t => {
+    const g = t.parentElement, on = t.classList.contains('on');
+    g.querySelectorAll('.on').forEach(x => x.classList.remove('on'));
+    if (!(on && g.dataset.opt)) t.classList.add('on');
+  },
+  save: submitForm,
+  phadd: () => $('#pf').click(),
+  phdel: t => {
+    if (!FORM) return;
+    if (t.dataset.pid) FORM.removed.push(t.dataset.pid);
+    else FORM.newPh = FORM.newPh.filter(x => x.nid !== t.dataset.nid);
+    t.parentElement.remove();
+  },
+  photo: (t, e) => { e.stopPropagation(); openPhoto(t.dataset.rid, t.dataset.pid); },
+  phrm: async t => { if (await ask('이 사진을 삭제할까요?', '삭제', true)) { removePhoto(t.dataset.rid, t.dataset.pid); closeM(); toast('삭제했어요'); } },
+  del: async (t, e) => {
+    e.stopPropagation();
+    const r = RECS.get(t.dataset.id); if (!r) return;
+    const np = (r.photos || []).length;
+    if (await ask(`이 ${TYPES[r.type].nm} 기록을 삭제할까요?${np ? `\n사진 ${np}장도 함께 삭제돼요.` : ''}`, '삭제', true)) { deleteRec(r.id); toast('삭제했어요'); }
+  },
+  older: extendBack,
+  ftan: t => { FILTER.tan = t.checked; render(); },
+  eprofile: openProfile,
+  psave: () => {
+    const n = $('#pn').value.trim(); if (!n) return toast('이름을 입력해 주세요');
+    famSet({ dog: { name: n, breed: $('#pb').value.trim(), birthday: $('#pd').value } }); closeM(); toast('저장했어요');
+  },
+  etarget: openTarget,
+  tgsave: () => {
+    setCfg({ target: { poop: Math.max(1, Math.round(num($('#tp').value)) || 2), walkMin: Math.max(1, Math.round(num($('#tw').value)) || 60), wMin: num($('#tl').value), wMax: num($('#th2').value) } });
+    closeM(); toast('저장했어요');
+  },
+  addmember: () => {
+    openM(`<h3>가족 추가</h3><div class="lbl">이름</div><input id="mn" placeholder="예: 할머니"><div class="row"><button class="btn ghost" data-act="mclose">취소</button><button class="btn" data-act="msave">추가</button></div>`);
+  },
+  msave: () => {
+    const n = $('#mn').value.trim(); if (!n) return toast('이름을 입력해 주세요');
+    if ((FAM.members || []).includes(n)) return toast('이미 있는 이름이에요');
+    famSet({ members: [...FAM.members, n] }); closeM();
+  },
+  rmmember: async t => { if (await ask(`${t.dataset.n}님을 가족 목록에서 뺄까요? (이 분의 기록은 남아요)`, '삭제', true)) famSet({ members: FAM.members.filter(m => m !== t.dataset.n) }); },
+  mkadmin: async t => { if (await ask(`관리자를 ${t.dataset.n}님으로 바꿀까요?\n이후 나는 삭제와 기준 수정을 할 수 없어요.`, '변경')) famSet({ admin: t.dataset.n }); },
+  switchme: () => {
+    openM(`<h3>내 이름 선택</h3>${(FAM.members || []).map(m => `<button class="btn ghost block" data-act="setme" data-n="${esc(m)}">${esc(m)}${m === ME ? ' ✓' : ''}</button>`).join('')}`);
+  },
+  setme: t => { ME = t.dataset.n; lsSet(KEY.me, ME); closeM(); render(); toast(`${ME}(으)로 바꿨어요`); },
+  tadd: () => { if (!TABLE) return; const r = {}; TABLE.o.cols.forEach(c => r[c.k] = c.t === 'sel' ? c.opts[0][0] : c.t === 'num' ? 0 : ''); TABLE.rows.push(r); TABLE.draw(); },
+  tdel: t => { if (!TABLE) return; TABLE.rows.splice(+t.dataset.i, 1); TABLE.draw(); },
+  tsave: () => { if (!TABLE) return; const { o, rows } = TABLE; o.save(rows); closeM(); toast('저장했어요'); },
+  backup: openBackup,
+  dobackup: async () => {
+    const f = $('#bf').value, t = $('#bt').value, p = $('#bp').checked;
+    if (!f || !t || f > t) return toast('기간을 확인해 주세요');
+    closeM();
+    await backupRange(f, t, p, '백업');
+  },
+  restore: () => $('#rf').click(),
+  cleanup: openCleanup,
+  docleanup: async () => { const c = $('#cd').value; if (!c) return toast('날짜를 입력해 주세요'); closeM(); await doCleanup(c); },
+  recount: () => recount(false)
+};
+Object.entries(EDITORS).forEach(([k, f]) => ACTS[k] = f);
+
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-act]');
+  if (!t || t.tagName === 'INPUT' && t.type !== 'checkbox') return;
+  if (t.type === 'checkbox') return;
+  const f = ACTS[t.dataset.act];
+  if (f) f(t, e);
+});
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (t.id === 'pf') pickPhotos(t);
+  else if (t.id === 'rf') { const fs = [...t.files]; t.value = ''; if (fs.length) restoreFiles(fs); }
+  else if (t.dataset && t.dataset.act === 'ftan') ACTS.ftan(t);
+  else if (TABLE && t.dataset && t.dataset.k !== undefined && t.tagName === 'SELECT') TABLE.rows[+t.dataset.i][t.dataset.k] = t.value;
+});
+document.addEventListener('input', e => {
+  const t = e.target;
+  if (TABLE && t.dataset && t.dataset.k !== undefined && t.tagName === 'INPUT') TABLE.rows[+t.dataset.i][t.dataset.k] = t.value;
+  if (t.name === 'amount' && FORM && FORM.type === 'expense') { // 금액 천 단위 콤마
+    const n = num(t.value); t.value = n ? n.toLocaleString('ko-KR') : '';
+  }
+});
+
+/* =====================================================================
+   16. 시작
+   ===================================================================== */
+function authReady() {
+  return new Promise((res, rej) => {
+    const un = onAuthStateChanged(auth, u => {
+      if (u) { un(); res(u); } else signInAnonymously(auth).catch(err => { un(); rej(err); });
+    });
+  });
+}
+async function boot() {
+  // 뒤로가기 종료 확인용 기록 + 마지막 화면 복원
+  if (!location.hash && UI.route) history.replaceState(null, '', UI.route);
+  history.replaceState({ r: 'exit' }, '', location.href);
+  history.pushState({ r: 'app' }, '', location.href);
+  try { await authReady(); }
+  catch (e) { console.error(e); AUTH_ERR = 'auth'; }
+  BOOTED = true; window.__ready = true;
+  if (CODE && !AUTH_ERR) startSync();
+  render();
+}
+boot();
+</script>
+</body>
+</html>
